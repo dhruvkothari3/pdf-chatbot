@@ -28,35 +28,41 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
 # load the embedding model once
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
+def get_index_path(pdf_name: str) -> tuple:
+    base = pdf_name.replace(".pdf", "")
+    return f"{base}_index.faiss", f"{base}_chunks.json"
 
 
-def build_faiss_index(chunks: list):
+
+def build_faiss_index(chunks: list,pdf_name: str) -> tuple:
     embeddings = model.encode(chunks)
     embeddings_float = np.array(embeddings).astype('float32')
     
     index = faiss.IndexFlatL2(384)
     index.add(embeddings_float)
+    index_path, chunks_path = get_index_path(pdf_name)
     
     # save index to disk
-    faiss.write_index(index, "index.faiss")
+    faiss.write_index(index, index_path)
     
     # save chunks to disk so we can retrieve text later
-    with open("chunks.json", "w") as f:
+    with open(chunks_path, "w") as f:
         json.dump(chunks, f)
     
     print(f"Index built: {index.ntotal} vectors stored")
     return index, chunks
 
-def load_or_build_index(chunks: list):
-    if os.path.exists("index.faiss") and os.path.exists("chunks.json"):
+def load_or_build_index(chunks: list, pdf_name: str):
+    index_path, chunks_path = get_index_path(pdf_name)
+    if os.path.exists(index_path) and os.path.exists(chunks_path):
         print("Loading existing index from disk...")
-        index = faiss.read_index("index.faiss")
-        with open("chunks.json", "r") as f:
+        index = faiss.read_index(index_path)
+        with open(chunks_path, "r") as f:
             chunks = json.load(f)
         return index, chunks
     else:
         print("Building new index...")
-        return build_faiss_index(chunks)
+        return build_faiss_index(chunks, pdf_name)
 
 def find_relevant_chunks(question: str, index, chunks: list, top_k: int = 2) -> list:
     question_vector = model.encode([question])
@@ -98,19 +104,12 @@ Answer:"""
    
 
 if __name__ == "__main__":
-    text = extract_text("test.pdf")
+    pdf_name = "test.pdf"
+    text = extract_text(pdf_name)
     chunks = chunk_text(text)
+    index, chunks = load_or_build_index(chunks, pdf_name)
     
-    index, chunks = load_or_build_index(chunks)
-    
-    questions = [
-        "What programming languages does this person know?",
-        "What is this person's experience?",
-        "Where is this person from?"
-    ]
-    
-    for q in questions:
-        relevant = find_relevant_chunks(q, index, chunks)
-        answer = answer_question(q, relevant)
-        print(f"Q: {q}")
-        print(f"A: {answer}\n")
+    question = "What programming languages does this person know?"
+    relevant = find_relevant_chunks(question, index, chunks)
+    answer = answer_question(question, relevant)
+    print(f"Q: {question}\nA: {answer}")
