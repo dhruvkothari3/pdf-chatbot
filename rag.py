@@ -2,6 +2,9 @@ from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 import os
 from dotenv import load_dotenv
+import faiss
+import numpy as np
+import json
 
 
 
@@ -25,20 +28,43 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
 # load the embedding model once
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-def embed_chunks(chunks: list) -> list:
+
+
+def build_faiss_index(chunks: list):
     embeddings = model.encode(chunks)
-    return embeddings
+    embeddings_float = np.array(embeddings).astype('float32')
+    
+    index = faiss.IndexFlatL2(384)
+    index.add(embeddings_float)
+    
+    # save index to disk
+    faiss.write_index(index, "index.faiss")
+    
+    # save chunks to disk so we can retrieve text later
+    with open("chunks.json", "w") as f:
+        json.dump(chunks, f)
+    
+    print(f"Index built: {index.ntotal} vectors stored")
+    return index, chunks
 
-from sentence_transformers import util
+def load_or_build_index(chunks: list):
+    if os.path.exists("index.faiss") and os.path.exists("chunks.json"):
+        print("Loading existing index from disk...")
+        index = faiss.read_index("index.faiss")
+        with open("chunks.json", "r") as f:
+            chunks = json.load(f)
+        return index, chunks
+    else:
+        print("Building new index...")
+        return build_faiss_index(chunks)
 
-def find_relevant_chunks(question: str, chunks: list, chunk_embeddings, top_k: int = 2) -> list:
-    question_embedding = model.encode(question)
+def find_relevant_chunks(question: str, index, chunks: list, top_k: int = 2) -> list:
+    question_vector = model.encode([question])
+    question_float = np.array(question_vector).astype('float32')
     
-    similarities = util.cos_sim(question_embedding, chunk_embeddings)[0]
+    distances, indices = index.search(question_float, k=top_k)
     
-    top_results = similarities.argsort(descending=True)[:top_k]
-    
-    relevant_chunks = [chunks[i] for i in top_results]
+    relevant_chunks = [chunks[i] for i in indices[0]]
     return relevant_chunks
 
 from groq import Groq
@@ -67,21 +93,24 @@ Answer:"""
     )
     return response.choices[0].message.content
     
+
+
    
 
 if __name__ == "__main__":
     text = extract_text("test.pdf")
     chunks = chunk_text(text)
-    embeddings = embed_chunks(chunks)
+    
+    index, chunks = load_or_build_index(chunks)
     
     questions = [
-    "What programming languages does this person know?",
-    "What is this person's experience?",
-    "Where is this person from?"
-]
-
-for q in questions:
-    relevant = find_relevant_chunks(q, chunks, embeddings, top_k=2)
-    answer = answer_question(q, relevant)
-    print(f"Q: {q}")
-    print(f"A: {answer}\n")
+        "What programming languages does this person know?",
+        "What is this person's experience?",
+        "Where is this person from?"
+    ]
+    
+    for q in questions:
+        relevant = find_relevant_chunks(q, index, chunks)
+        answer = answer_question(q, relevant)
+        print(f"Q: {q}")
+        print(f"A: {answer}\n")
