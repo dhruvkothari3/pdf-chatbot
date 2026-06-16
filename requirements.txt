@@ -1,3 +1,9 @@
 fastapi
 uvicorn
 python-multipart
+pypdf
+sentence-transformers
+faiss-cpu
+groq
+python-dotenv
+aiofiles

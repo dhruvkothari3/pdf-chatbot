@@ -6,6 +6,10 @@ import os
 from rag import extract_text, chunk_text, load_or_build_index, find_relevant_chunks, answer_question, get_index_path
 import json
 import faiss
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+
 
 app = FastAPI()
 
@@ -15,6 +19,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 class QuestionRequest(BaseModel):
     pdf_name: str
@@ -63,6 +68,12 @@ async def ask_question(request: QuestionRequest):
         "answer": answer,
         "pdf": request.pdf_name
     }
+
+app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+
+@app.get("/")
+def serve_react():
+    return FileResponse("frontend/build/index.html")
 
 @app.get("/")
 def root():
