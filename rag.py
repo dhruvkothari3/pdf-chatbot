@@ -8,6 +8,7 @@ import json
 
 
 
+
 def extract_text(pdf_path: str) -> str:
     reader = PdfReader(pdf_path)
     full_text = ""
@@ -28,32 +29,37 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
 # load the embedding model once
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-def get_index_path(pdf_name: str) -> tuple:
-    base = pdf_name.replace(".pdf", "")
-    return f"{base}_index.faiss", f"{base}_chunks.json"
+import hashlib
+
+def get_file_hash(file_path: str) -> str:
+    with open(file_path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+def get_index_path(file_path: str) -> tuple:
+    file_hash = get_file_hash(file_path)
+    return f"{file_hash}_index.faiss", f"{file_hash}_chunks.json"
 
 
 
-def build_faiss_index(chunks: list,pdf_name: str) -> tuple:
+def build_faiss_index(chunks: list, file_path: str) -> tuple:
     embeddings = model.encode(chunks)
     embeddings_float = np.array(embeddings).astype('float32')
     
     index = faiss.IndexFlatL2(384)
     index.add(embeddings_float)
-    index_path, chunks_path = get_index_path(pdf_name)
     
-    # save index to disk
+    index_path, chunks_path = get_index_path(file_path)
+    
     faiss.write_index(index, index_path)
     
-    # save chunks to disk so we can retrieve text later
     with open(chunks_path, "w") as f:
         json.dump(chunks, f)
     
     print(f"Index built: {index.ntotal} vectors stored")
     return index, chunks
 
-def load_or_build_index(chunks: list, pdf_name: str):
-    index_path, chunks_path = get_index_path(pdf_name)
+def load_or_build_index(chunks: list, file_path: str):
+    index_path, chunks_path = get_index_path(file_path)
     if os.path.exists(index_path) and os.path.exists(chunks_path):
         print("Loading existing index from disk...")
         index = faiss.read_index(index_path)
@@ -62,7 +68,8 @@ def load_or_build_index(chunks: list, pdf_name: str):
         return index, chunks
     else:
         print("Building new index...")
-        return build_faiss_index(chunks, pdf_name)
+        return build_faiss_index(chunks, file_path)
+    
 
 def find_relevant_chunks(question: str, index, chunks: list, top_k: int = 2) -> list:
     question_vector = model.encode([question])
@@ -104,10 +111,10 @@ Answer:"""
    
 
 if __name__ == "__main__":
-    pdf_name = "test.pdf"
-    text = extract_text(pdf_name)
+    file_path = "test.pdf"
+    text = extract_text(file_path)
     chunks = chunk_text(text)
-    index, chunks = load_or_build_index(chunks, pdf_name)
+    index, chunks = load_or_build_index(chunks, file_path)
     
     question = "What programming languages does this person know?"
     relevant = find_relevant_chunks(question, index, chunks)
